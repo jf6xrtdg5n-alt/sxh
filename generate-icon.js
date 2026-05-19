@@ -1,36 +1,33 @@
-// Generate apple-touch-icon.png — a 180x180 pink-purple icon with a star
+// Generate apple-touch-icon.png — white bg with light purple 4-pointed star
 const zlib = require('zlib');
 const fs = require('fs');
 
 const SIZE = 180;
-const BG_R = 0xE8, BG_G = 0x91, BG_B = 0xA0; // pink #E891A0
-const STAR_R = 0xFF, STAR_G = 0xFF, STAR_B = 0xFF; // white star
+const BG_R = 0xFF, BG_G = 0xFF, BG_B = 0xFF; // white
+const STAR_R = 0xC7, STAR_G = 0x7D, STAR_B = 0xBA; // light purple #C77DBA
 
-function dist(cx, cy, x, y) {
-  return Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
-}
-
-// Star path test: rough 5-pointed star centered at (cx, cy) with radius r
-function inStar(cx, cy, r, x, y) {
+// 4-pointed sparkle star centered at (cx, cy) with radius r
+// Points at 45°, 135°, 225°, 315° (diagonal cross / sparkle shape)
+function inSparkle(cx, cy, r, x, y) {
   const dx = x - cx, dy = y - cy;
-  const angle = Math.atan2(dy, dx) + Math.PI / 2; // rotate so top point is up
   const distFromCenter = Math.sqrt(dx * dx + dy * dy);
-  const normDist = distFromCenter / r;
-  if (normDist > 1.2) return false;
+  if (distFromCenter > r * 1.05) return false;
+  if (distFromCenter < r * 0.06) return true; // tiny solid center
 
-  // 5-pointed star: outer radius r, inner radius ~0.4r
+  // Rotate by 45° so points are on axes, then check 4-pointed star
+  // 4-pointed star: narrow in one axis, wide in the perpendicular
+  const angle = Math.atan2(dy, dx) + Math.PI / 4; // rotate 45° so points are diagonal
+  const absAngle = Math.abs(angle);
+
+  // 4-pointed: each point spans PI/4, valleys between them at PI/2 intervals
+  const halfPeriod = Math.PI / 2;
+  let a = ((absAngle % halfPeriod) + halfPeriod) % halfPeriod; // 0 to PI/2
+
+  // At a=0 (axis direction): full radius
+  // At a=PI/4 (diagonal, halfway between axes): inner radius
   const outerR = r;
-  const innerR = r * 0.38;
-  const points = 5;
-  const anglePerPoint = (2 * Math.PI) / points;
-  const halfAngle = anglePerPoint / 2;
-
-  // Find which "segment" the angle is in
-  let a = ((angle % anglePerPoint) + anglePerPoint) % anglePerPoint;
-  if (a > halfAngle) a = anglePerPoint - a;
-
-  // Interpolate radius based on how close to the point vs valley
-  const t = a / halfAngle;
+  const innerR = r * 0.15;
+  const t = a / (Math.PI / 4); // 0 at axis, 1 at diagonal
   const maxR = outerR * (1 - t) + innerR * t;
 
   return distFromCenter <= maxR;
@@ -44,7 +41,7 @@ function inRoundedRect(cx, cy, w, h, r, x, y) {
   return rx * rx + ry * ry <= r * r;
 }
 
-const rawData = Buffer.alloc(SIZE * SIZE * 4 + SIZE); // +SIZE for filter bytes
+const rawData = Buffer.alloc(SIZE * SIZE * 4 + SIZE);
 
 for (let py = 0; py < SIZE; py++) {
   const rowOffset = py * (SIZE * 4 + 1);
@@ -53,16 +50,12 @@ for (let py = 0; py < SIZE; py++) {
   for (let px = 0; px < SIZE; px++) {
     const pixelOffset = rowOffset + 1 + px * 4;
 
-    // Background: rounded rectangle (slightly smaller than canvas)
     const inBg = inRoundedRect(SIZE/2, SIZE/2, SIZE - 8, SIZE - 8, 36, px, py);
-
-    // Star in center
-    const inStarResult = inStar(SIZE/2, SIZE/2 - 2, 48, px, py);
+    const inStarResult = inSparkle(SIZE/2, SIZE/2 - 2, 52, px, py);
 
     let r = BG_R, g = BG_G, b = BG_B, a = 255;
 
     if (!inBg) {
-      // Transparent outside rounded rect
       a = 0;
     } else if (inStarResult) {
       r = STAR_R; g = STAR_G; b = STAR_B;
@@ -77,7 +70,6 @@ for (let py = 0; py < SIZE; py++) {
 
 // Build PNG
 function crc32(buf) {
-  // CRC-32 lookup table
   const table = new Int32Array(256);
   for (let i = 0; i < 256; i++) {
     let c = i;
@@ -103,21 +95,19 @@ function pngChunk(type, data) {
   return Buffer.concat([len, typeBytes, data, crcVal]);
 }
 
-// IHDR
 const ihdr = Buffer.alloc(13);
-ihdr.writeUInt32BE(SIZE, 0);  // width
-ihdr.writeUInt32BE(SIZE, 4);  // height
-ihdr[8] = 8;   // bit depth
-ihdr[9] = 6;   // color type: RGBA
-ihdr[10] = 0;  // compression
-ihdr[11] = 0;  // filter
-ihdr[12] = 0;  // interlace
+ihdr.writeUInt32BE(SIZE, 0);
+ihdr.writeUInt32BE(SIZE, 4);
+ihdr[8] = 8;
+ihdr[9] = 6;
+ihdr[10] = 0;
+ihdr[11] = 0;
+ihdr[12] = 0;
 
-// Compress raw data
 const compressed = zlib.deflateSync(rawData);
 
 const png = Buffer.concat([
-  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), // PNG signature
+  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
   pngChunk('IHDR', ihdr),
   pngChunk('IDAT', compressed),
   pngChunk('IEND', Buffer.alloc(0)),
